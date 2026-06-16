@@ -1,0 +1,20 @@
+# Python cache files
+__pycache__/
+*.pyc
+
+# Local databases, checkpoints, and output files
+blastdb/
+output/
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Ignore contents of input directories, but keep the directories themselves via .gitkeep
+input_FASTA/*
+!input_FASTA/.gitkeep
+
+input_database/*
+!input_database/.gitkeep
