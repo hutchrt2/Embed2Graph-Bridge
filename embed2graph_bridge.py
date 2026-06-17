@@ -1,10 +1,12 @@
 import argparse
 import os
 import glob
+import json
 import torch
 import faiss
 import numpy as np
 import pandas as pd
+from datetime import datetime
 from Bio import SeqIO
 from transformers import AutoTokenizer, AutoModel
 
@@ -75,26 +77,102 @@ def init_database(args):
     sequences = [str(r.seq) for r in records]
     uniprot_ids = [r.id.split('|')[1] if '|' in r.id else r.id for r in records]
     
-    device = get_device(args.device)
-    tokenizer, model = load_model(args.model, device=device)
-    print(f"Embedding {len(sequences)} reference sequences...")
-    embeddings = embed_sequences(sequences, tokenizer, model, device=device, batch_size=args.batch_size)
-    
+    # Define cache paths
     os.makedirs(args.db_dir, exist_ok=True)
+    index_path = os.path.join(args.db_dir, "faiss_index.bin")
+    emb_path = os.path.join(args.db_dir, "esm2_embeddings.npy")
+    ids_path = os.path.join(args.db_dir, "index_uniprot_ids.txt")
+    meta_path = os.path.join(args.db_dir, "index_metadata.json")
+    
+    # Caching check
+    use_cache = False
+    existing_embeddings = None
+    existing_ids = []
+    
+    if not args.force:
+        cache_files_exist = all(os.path.exists(p) for p in [index_path, emb_path, ids_path, meta_path])
+        if cache_files_exist:
+            try:
+                with open(meta_path, "r") as f:
+                    cache_metadata = json.load(f)
+                
+                # Verify that the model name matches
+                if cache_metadata.get("model_name") == args.model:
+                    existing_embeddings = np.load(emb_path)
+                    with open(ids_path, "r") as f:
+                        existing_ids = [line.strip() for line in f]
+                    
+                    # Ensure alignment check
+                    if len(existing_ids) == existing_embeddings.shape[0]:
+                        use_cache = True
+                        print(f"Found existing database cache with {len(existing_ids)} embedded sequences (Model: {args.model}).")
+                    else:
+                        print("Warning: Cache file mismatch (IDs count vs embeddings count). Rebuilding index.")
+                else:
+                    print(f"Notice: Model changed from {cache_metadata.get('model_name')} to {args.model}. Rebuilding database from scratch.")
+            except Exception as e:
+                print(f"Warning: Failed to load cache metadata: {e}. Rebuilding database from scratch.")
+    else:
+        print("Force rebuild requested. Bypassing database cache.")
+        
+    # Process incrementally or full build
+    if use_cache:
+        existing_id_set = set(existing_ids)
+        new_indices = []
+        for i, uid in enumerate(uniprot_ids):
+            if uid not in existing_id_set:
+                new_indices.append(i)
+                
+        if not new_indices:
+            print("All sequences in reference FASTA are already embedded and indexed. Skipping database initialization.")
+            return
+            
+        print(f"Incremental update: {len(new_indices)} new sequences detected to embed.")
+        new_seqs = [sequences[i] for i in new_indices]
+        new_uids = [uniprot_ids[i] for i in new_indices]
+        
+        device = get_device(args.device)
+        tokenizer, model = load_model(args.model, device=device)
+        print(f"Embedding {len(new_seqs)} new sequences...")
+        new_embeddings = embed_sequences(new_seqs, tokenizer, model, device=device, batch_size=args.batch_size)
+        
+        # Combine
+        embeddings = np.vstack([existing_embeddings, new_embeddings])
+        combined_ids = existing_ids + new_uids
+    else:
+        device = get_device(args.device)
+        tokenizer, model = load_model(args.model, device=device)
+        print(f"Embedding all {len(sequences)} reference sequences...")
+        embeddings = embed_sequences(sequences, tokenizer, model, device=device, batch_size=args.batch_size)
+        combined_ids = uniprot_ids
+
+    # Save outputs and build FAISS index
+    print(f"Building FAISS index with {embeddings.shape[0]} sequences...")
     d = embeddings.shape[1]
     index = faiss.IndexFlatIP(d)
     
     try:
         index.add(embeddings)
-        faiss.write_index(index, os.path.join(args.db_dir, "faiss_index.bin"))
-        np.save(os.path.join(args.db_dir, "esm2_embeddings.npy"), embeddings)
-        with open(os.path.join(args.db_dir, "index_uniprot_ids.txt"), "w") as f:
-            for uid in uniprot_ids:
+        faiss.write_index(index, index_path)
+        np.save(emb_path, embeddings)
+        with open(ids_path, "w") as f:
+            for uid in combined_ids:
                 f.write(f"{uid}\n")
+                
+        # Write metadata JSON
+        metadata = {
+            "model_name": args.model,
+            "dimension": d,
+            "last_updated": datetime.now().isoformat(),
+            "sequence_count": len(combined_ids)
+        }
+        with open(meta_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+            
     except Exception as e:
-        raise RuntimeError(f"Failed to create or save FAISS index: {e}")
+        raise RuntimeError(f"Failed to create or save FAISS database index: {e}")
         
-    print(f"Initialization complete. Files saved in '{args.db_dir}'.")
+    print(f"Initialization complete. Total database size: {len(combined_ids)} sequences. Files saved in '{args.db_dir}'.")
 
 def query_database(args):
     print("Phase B: Query Embedding & Vector Search...")
@@ -206,6 +284,7 @@ def main():
     parser.add_argument("--k", type=int, default=5, help="Number of nearest neighbors to retrieve")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size for model inference")
     parser.add_argument("--device", type=str, default=None, choices=["cuda", "mps", "cpu"], help="Specify compute device")
+    parser.add_argument("--force", action="store_true", help="Force rebuild of reference database, bypassing cache")
     
     # Configurable database/metadata input options
     parser.add_argument("--db-fasta", type=str, default="input_database/psfd_sequences.fasta", help="Path to reference FASTA database")

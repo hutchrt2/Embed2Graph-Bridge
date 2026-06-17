@@ -11,6 +11,7 @@ By leveraging the state-of-the-art ESM-2 transformer model (`facebook/esm2_t12_3
 - **Transformer Embeddings**: Employs Hugging Face ESM-2 models for embedding protein sequences into dense vectors.
 - **Fast Vector Similarity**: Uses FAISS (`IndexFlatIP`) for low-latency cosine similarity search.
 - **Compute Optimization (FP16)**: Automatically loads the model in half-precision (FP16) on CUDA and Apple Silicon MPS devices, halving memory usage and speeding up inference.
+- **Incremental Vector Caching**: Checks the local database and caches existing embeddings. When parsing the reference FASTA, it only runs ESM-2 inference on new sequence records, rebuilding the FAISS index incrementally and saving execution time.
 - **Relational Handshake (Join)**: Merges the nearest-neighbor search results with a knowledge graph metadata CSV on UniProt IDs, producing an annotated output.
 - **Configurable & Flexible**: Supports full customization of batch sizes, compute devices, reference databases, input paths, and query inputs via CLI arguments.
 - **Robust Error Checks**: Includes diagnostic warnings for mismatched sequence identifiers between databases and metadata.
@@ -23,6 +24,7 @@ By leveraging the state-of-the-art ESM-2 transformer model (`facebook/esm2_t12_3
 embed2graph-bridge/
 ├── embed2graph_bridge.py   # Main CLI execution script
 ├── requirements.txt         # Package dependencies list
+├── LICENSE                  # MIT License
 ├── README.md               # Tool documentation
 ├── .gitignore              # Configured Git tracking instructions
 ├── input_database/         # Directory for reference sequences & metadata
@@ -33,6 +35,10 @@ embed2graph-bridge/
 │   ├── .gitkeep            # Tracked directory placeholder
 │   └── query.fasta         (Ignored/Local query sequences)
 └── blastdb/                # Directory generated for storing the FAISS index (Ignored)
+    ├── faiss_index.bin     # FAISS vector index
+    ├── esm2_embeddings.npy # Numpy array of saved embeddings
+    ├── index_uniprot_ids.txt # List of cached UniProt IDs
+    └── index_metadata.json # Cache metadata (model name, dimensions, timestamps)
 ```
 
 ---
@@ -41,7 +47,7 @@ embed2graph-bridge/
 
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/hutchrt2/Embed2Graph-Bridge
+   git clone https://github.com/hutchrt2/Embed2Graph-Bridge.git
    cd embed2graph-bridge
    ```
 
@@ -66,7 +72,12 @@ Process reference sequences from the reference FASTA to build and save the FAISS
 ```bash
 python3 embed2graph_bridge.py --init
 ```
-*Outputs are saved in the `blastdb/` directory.*
+- *Outputs are saved in the `blastdb/` directory.*
+- *Subsequent runs of `--init` will skip embedding for already processed sequences.*
+- *To force a complete rebuild of the database and ignore the cache, run:*
+  ```bash
+  python3 embed2graph_bridge.py --init --force
+  ```
 
 ### Step 2: Query Embedding & Vector Search (Phases B to E)
 Embed query sequences, find matching neighbors in the database, join with metadata, and serialize to CSV.
@@ -86,6 +97,7 @@ python3 embed2graph_bridge.py --help
 
 ### Options Details:
 - `--init`: Run database initialization. Parses reference sequences, generates ESM-2 embeddings, and writes the FAISS vector index.
+- `--force`: Force rebuild of reference database, bypassing cache.
 - `--query PATH`: Run query pipeline. Path can be a single FASTA file or a directory containing `.fasta` / `.fa` files.
 - `--output PATH`: Destination path for final query results CSV. *(Default: `output/vector_query_results.csv`)*
 - `--model NAME`: Hugging Face model identifier for ESM-2. *(Default: `facebook/esm2_t12_35M_UR50D`)*
@@ -95,3 +107,9 @@ python3 embed2graph_bridge.py --help
 - `--db-fasta PATH`: Path to reference database FASTA. *(Default: `input_database/psfd_sequences.fasta`)*
 - `--metadata PATH`: Path to reference metadata CSV containing a `uniprot_id` column. *(Default: `input_database/sequence_metadata.csv`)*
 - `--db-dir PATH`: Directory where FAISS indices and vector database records are stored. *(Default: `blastdb`)*
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
