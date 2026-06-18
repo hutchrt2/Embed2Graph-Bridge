@@ -229,24 +229,21 @@ def query_database(args):
         k = min(args.k, index.ntotal)
         distances, indices = index.search(q_embeddings, k)
         
-        # Phase C: Blueprint Mimic
+        # Phase C: Vector Similarity Results
         for i, (dists, idxs) in enumerate(zip(distances, indices)):
             q_id = q_ids[i]
             for d, idx in zip(dists, idxs):
                 if idx == -1: continue
                 t_id = uniprot_ids[idx]
-                cosine_sim = d 
-                pident = min(100.0, max(0.0, float(cosine_sim) * 100))
-                evalue = max(0.0, 1.0 - float(cosine_sim))
+                cosine_sim = float(d)
                 
                 all_results.append({
                     "query": q_id,
                     "target": t_id,
-                    "pident": pident,
-                    "evalue": evalue,
-                    "qcov": 1.0,
-                    "tcov": 1.0
+                    "score": cosine_sim,
+                    "score_type": "cosine_similarity"
                 })
+
                 
     if not all_results:
         print("No search results found.")
