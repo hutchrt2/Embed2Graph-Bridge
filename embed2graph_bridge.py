@@ -196,8 +196,10 @@ def query_database(args):
     if not os.path.exists(meta_path):
         raise FileNotFoundError(f"Metadata CSV not found at {meta_path}")
     metadata_df = pd.read_csv(meta_path)
+    if "target_accession" in metadata_df.columns:
+        metadata_df = metadata_df.rename(columns={"target_accession": "uniprot_id"})
     if "uniprot_id" not in metadata_df.columns:
-        raise ValueError(f"Metadata CSV at {meta_path} is missing the required 'uniprot_id' column.")
+        raise ValueError(f"Metadata CSV at {meta_path} is missing the required 'uniprot_id' column (or 'target_accession' to map to it).")
     
     query_files = []
     if os.path.isdir(args.query):
@@ -253,17 +255,30 @@ def query_database(args):
     
     # Phase D: The Relational Handshake (The Join)
     print("Phase D: Joining with knowledge graph metadata...")
-    joined_df = pd.merge(results_df, metadata_df, left_on="target", right_on="uniprot_id", how="inner")
+    
+    # Check if target corresponds to global_node_id or uniprot_id
+    sample_targets = results_df["target"].dropna().unique()
+    is_global_node_id = any(val in metadata_df["global_node_id"].values for val in sample_targets)
+
+    if is_global_node_id:
+        print("Detected global_node_id targets. Performing join on global_node_id...")
+        results_df = results_df.rename(columns={"target": "global_node_id"})
+        joined_df = pd.merge(results_df, metadata_df, on="global_node_id", how="inner")
+    else:
+        print("Detected standard target IDs. Performing join on uniprot_id...")
+        joined_df = pd.merge(results_df, metadata_df, left_on="target", right_on="uniprot_id", how="inner")
     
     if joined_df.empty:
         print("=" * 60)
         print("WARNING: The join with metadata resulted in an empty DataFrame.")
         print("Troubleshooting checks:")
-        print(" 1. Ensure reference FASTA headers yield target IDs matching metadata 'uniprot_id'.")
-        sample_targets = list(results_df["target"].unique()[:5])
-        sample_meta = list(metadata_df["uniprot_id"].unique()[:5])
+        print(" 1. Ensure reference FASTA headers yield target IDs matching metadata 'uniprot_id' or 'global_node_id'.")
+        sample_targets = list(sample_targets[:5])
+        sample_meta = list(metadata_df["uniprot_id"].unique()[:5]) if "uniprot_id" in metadata_df.columns else []
+        sample_nodes = list(metadata_df["global_node_id"].unique()[:5]) if "global_node_id" in metadata_df.columns else []
         print(f"    Sample target IDs extracted: {sample_targets}")
         print(f"    Sample metadata uniprot_ids: {sample_meta}")
+        print(f"    Sample metadata global_node_ids: {sample_nodes}")
         print(" 2. Make sure they match exactly (case-sensitive, no extra whitespace).")
         print("=" * 60)
         
