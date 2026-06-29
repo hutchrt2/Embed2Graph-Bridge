@@ -8,7 +8,8 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from Bio import SeqIO
-from transformers import AutoTokenizer, AutoModel
+from esm.models.esmc import ESMC
+from esm.sdk.api import ESMProtein, LogitsConfig
 
 def get_device(device_override=None):
     if device_override:
@@ -19,17 +20,12 @@ def get_device(device_override=None):
         return "mps"
     return "cpu"
 
-def load_model(model_name="facebook/esm2_t12_35M_UR50D", device="cpu"):
+def load_model(model_name="esmc_300m", device="cpu"):
     print(f"Loading model {model_name} on {device}...")
     try:
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        # Apply float16 optimization on GPU to speed up and save memory
-        if device in ("cuda", "mps"):
-            model = AutoModel.from_pretrained(model_name, torch_dtype=torch.float16).to(device)
-        else:
-            model = AutoModel.from_pretrained(model_name).to(device)
+        model = ESMC.from_pretrained(model_name, device=torch.device(device))
         model.eval()
-        return tokenizer, model
+        return None, model
     except Exception as e:
         raise RuntimeError(f"Failed to load model {model_name}: {e}")
 
@@ -40,22 +36,30 @@ def embed_sequences(sequences, tokenizer, model, device="cpu", batch_size=8):
     
     for batch_idx, i in enumerate(range(0, total_seqs, batch_size)):
         batch_seqs = sequences[i:i + batch_size]
-        inputs = tokenizer(batch_seqs, return_tensors="pt", padding=True, truncation=True, max_length=1024).to(device)
         
-        with torch.no_grad():
-            outputs = model(**inputs)
-            attention_mask = inputs['attention_mask'].unsqueeze(-1)
-            token_embeddings = outputs.last_hidden_state
+        batch_embeddings = []
+        for seq in batch_seqs:
+            protein = ESMProtein(sequence=seq)
+            protein_tensor = model.encode(protein)
             
-            sum_embeddings = torch.sum(token_embeddings * attention_mask, dim=1)
-            sum_mask = torch.clamp(attention_mask.sum(dim=1), min=1e-9)
-            mean_pooled = sum_embeddings / sum_mask
-            
-            # L2 Normalize for cosine similarity calculation via inner product
-            mean_pooled = torch.nn.functional.normalize(mean_pooled, p=2, dim=1)
-            
-            # Convert back to float32 to prevent numeric type mismatch downstream (e.g., in FAISS)
-            embeddings.append(mean_pooled.to(torch.float32).cpu().numpy())
+            with torch.no_grad():
+                logits_output = model.logits(
+                    protein_tensor, 
+                    LogitsConfig(sequence=True, return_embeddings=True)
+                )
+                # logits_output.embeddings has shape (1, seq_len, hidden_size)
+                # We perform mean pooling over the sequence dimension (dim=1)
+                token_embeddings = logits_output.embeddings
+                mean_pooled = token_embeddings.mean(dim=1) # Shape: (1, hidden_size)
+                
+                # L2 Normalize for cosine similarity calculation
+                mean_pooled = torch.nn.functional.normalize(mean_pooled, p=2, dim=1)
+                
+                # Convert back to float32 to prevent numeric type mismatch downstream (e.g., in FAISS)
+                batch_embeddings.append(mean_pooled.to(torch.float32).cpu().numpy())
+                
+        if batch_embeddings:
+            embeddings.append(np.vstack(batch_embeddings))
             
         if (batch_idx + 1) % 5 == 0 or batch_idx + 1 == total_batches:
             print(f"  Processed batch {batch_idx + 1}/{total_batches} ({min((batch_idx + 1) * batch_size, total_seqs)}/{total_seqs} sequences)...")
@@ -80,7 +84,7 @@ def init_database(args):
     # Define cache paths
     os.makedirs(args.db_dir, exist_ok=True)
     index_path = os.path.join(args.db_dir, "faiss_index.bin")
-    emb_path = os.path.join(args.db_dir, "esm2_embeddings.npy")
+    emb_path = os.path.join(args.db_dir, "esmc_embeddings.npy")
     ids_path = os.path.join(args.db_dir, "index_uniprot_ids.txt")
     meta_path = os.path.join(args.db_dir, "index_metadata.json")
     
@@ -292,7 +296,7 @@ def main():
     parser.add_argument("--init", action="store_true", help="Initialize the database by embedding reference sequences")
     parser.add_argument("--query", type=str, help="Path to a query FASTA file or directory containing FASTA files")
     parser.add_argument("--output", type=str, default="output/vector_query_results.csv", help="Path to output CSV")
-    parser.add_argument("--model", type=str, default="facebook/esm2_t12_35M_UR50D", help="HuggingFace ESM-2 model name")
+    parser.add_argument("--model", type=str, default="esmc_300m", help="ESM-C model name (e.g., esmc_300m, esmc_600m)")
     parser.add_argument("--k", type=int, default=5, help="Number of nearest neighbors to retrieve")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size for model inference")
     parser.add_argument("--device", type=str, default=None, choices=["cuda", "mps", "cpu"], help="Specify compute device")

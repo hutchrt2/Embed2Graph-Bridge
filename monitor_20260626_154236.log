@@ -1,0 +1,28 @@
+Monitoring started at Fri Jun 26 03:42:36 PM EDT 2026
+Command PID: 1427543
+2026-06-26 15:42:36 CPU/MEM:
+%CPU %MEM   RSS    VSZ
+ 0.0  0.0 14348 235872
+Phase A: Initializing database...
+Found existing database cache with 10 embedded sequences (Model: esmc_300m).
+Incremental update: 6980 new sequences detected to embed.
+Loading model esmc_300m on cpu...
+Fetching 4 files:   0%|          | 0/4 [00:00<?, ?it/s]Fetching 4 files: 100%|██████████| 4/4 [00:00<00:00, 20.86it/s]Fetching 4 files: 100%|██████████| 4/4 [00:00<00:00, 20.81it/s]
+2026-06-26 15:43:06 CPU/MEM:
+%CPU %MEM   RSS    VSZ
+1384  2.1 2861036 16695480
+2026-06-26 15:43:36 CPU/MEM:
+%CPU %MEM   RSS    VSZ
+1685  2.3 3018084 16868732
+2026-06-26 15:44:06 CPU/MEM:
+%CPU %MEM   RSS    VSZ
+1786  2.4 3208692 17073792
+2026-06-26 15:44:36 CPU/MEM:
+%CPU %MEM   RSS    VSZ
+1836  2.4 3269896 17147920
+2026-06-26 15:45:06 CPU/MEM:
+%CPU %MEM   RSS    VSZ
+1867  2.7 3628936 17518812
+2026-06-26 15:45:37 CPU/MEM:
+%CPU %MEM   RSS    VSZ
+1887  2.7 3629200 17530076
