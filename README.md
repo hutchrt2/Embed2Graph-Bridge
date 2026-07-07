@@ -78,6 +78,10 @@ python3 embed2graph_bridge.py --init
   ```bash
   python3 embed2graph_bridge.py --init --force
   ```
+- *To delete existing database cache files first for a fresh start-over, run:*
+  ```bash
+  python3 embed2graph_bridge.py --init --clean
+  ```
 
 ### Step 2: Query Embedding & Vector Search (Phases B to E)
 Embed query sequences, find matching neighbors in the database, join with metadata, and serialize to CSV.
@@ -98,6 +102,7 @@ python3 embed2graph_bridge.py --help
 ### Options Details:
 - `--init`: Run database initialization. Parses reference sequences, generates ESM-2 embeddings, and writes the FAISS vector index.
 - `--force`: Force rebuild of reference database, bypassing cache.
+- `--clean`: Delete old database files inside the database directory first to force a clean start.
 - `--query PATH`: Run query pipeline. Path can be a single FASTA file or a directory containing `.fasta` / `.fa` files.
 - `--output PATH`: Destination path for final query results CSV. *(Default: `output/vector_query_results.csv`)*
 - `--model NAME`: Hugging Face model identifier for ESM-2. *(Default: `facebook/esm2_t12_35M_UR50D`)*

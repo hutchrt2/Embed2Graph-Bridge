@@ -93,6 +93,15 @@ def init_database(args):
     existing_embeddings = None
     existing_ids = []
     
+    if getattr(args, "clean", False):
+        print("Cleaning old database files for a fresh start...")
+        for p in [index_path, emb_path, ids_path, meta_path]:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception as e:
+                    print(f"Warning: Failed to remove cache file {p}: {e}")
+                    
     if not args.force:
         cache_files_exist = all(os.path.exists(p) for p in [index_path, emb_path, ids_path, meta_path])
         if cache_files_exist:
@@ -301,6 +310,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size for model inference")
     parser.add_argument("--device", type=str, default=None, choices=["cuda", "mps", "cpu"], help="Specify compute device")
     parser.add_argument("--force", action="store_true", help="Force rebuild of reference database, bypassing cache")
+    parser.add_argument("--clean", action="store_true", help="Delete old database files to force a clean start")
     
     # Configurable database/metadata input options
     parser.add_argument("--db-fasta", type=str, default="input_database/psfd_sequences.fasta", help="Path to reference FASTA database")
